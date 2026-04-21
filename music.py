@@ -36,15 +36,15 @@ def buscar_online():
 
     print(f"\n{CYAN}Procurando no servidor...{R}")
     try:
-        # 'q' que é uma busca geral 
+        # 'q' que é uma busca geral
         r = requests.get("https://lrclib.net/api/search",
                          params={"q": termo_busca}, timeout=10)
 
         if r.status_code == 200:
             resultados = r.json()
 
-            # pega os primeiros 10 resultados
-            opcoes = resultados[:10]
+            # pega os primeiros 20 resultados
+            opcoes = resultados[:20]
 
             if not opcoes:
                 print(f"{RED}Nenhum resultado encontrado para '{termo_busca}'.{R}")
@@ -56,7 +56,7 @@ def buscar_online():
             for i, res in enumerate(opcoes, 1):
                 artista = res.get("artistName", "Desconhecido")
                 track = res.get("trackName", "Sem título")
-                # verifica se tem a letra sincronizada 
+                # verifica se tem a letra sincronizada
                 status = f"{G}[LRC]{R}" if res.get(
                     "syncedLyrics") else f"{RED}[Sem Sincronia]{R}"
 
