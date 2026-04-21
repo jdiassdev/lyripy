@@ -3,22 +3,21 @@ import re
 import time
 import requests
 
-# Configurações de Cores
+# configuraçoes de cores
 Y = "\033[93m"
-P = "\033[95m"      # Linha atual / Opções (Roxo)
-D = "\033[37;2m"    # Texto Antigo / escuro
-G = "\033[92m"      # Verde / sucesso
-CYAN = "\033[96m"   # Menu / info
-RED = "\033[91m"    # Erro
+P = "\033[95m"      # linha atual / opçoes (roxo)
+D = "\033[37;2m"    # texto antigo / escuro
+G = "\033[92m"      # verde / sucesso
+CYAN = "\033[96m"   # menu / info
+RED = "\033[91m"    # erro
 BOLD = "\033[1m"
-R = "\033[0m"       # Reset
+R = "\033[0m"       # reset
 
 # --- CONFIGURAÇÃO DE PASTA ---
 PASTA_LYRICS = "lyrics"
 
 if not os.path.exists(PASTA_LYRICS):
     os.makedirs(PASTA_LYRICS)
-# -----------------------------
 
 
 def limpar_tela():
@@ -37,16 +36,15 @@ def buscar_online():
 
     print(f"\n{CYAN}Procurando no servidor...{R}")
     try:
-        # Usamos o parâmetro 'q' que é uma busca geral (mais chance de achar)
+        # 'q' que é uma busca geral 
         r = requests.get("https://lrclib.net/api/search",
                          params={"q": termo_busca}, timeout=10)
 
         if r.status_code == 200:
             resultados = r.json()
 
-            # Filtramos para mostrar apenas as que possuem letra (opcional, mas melhor para o karaokê)
-            # Pegamos os primeiros 5 resultados
-            opcoes = resultados[:5]
+            # pega os primeiros 10 resultados
+            opcoes = resultados[:10]
 
             if not opcoes:
                 print(f"{RED}Nenhum resultado encontrado para '{termo_busca}'.{R}")
@@ -58,7 +56,7 @@ def buscar_online():
             for i, res in enumerate(opcoes, 1):
                 artista = res.get("artistName", "Desconhecido")
                 track = res.get("trackName", "Sem título")
-                # Verifica se tem a letra sincronizada (syncedLyrics)
+                # verifica se tem a letra sincronizada 
                 status = f"{G}[LRC]{R}" if res.get(
                     "syncedLyrics") else f"{RED}[Sem Sincronia]{R}"
 
@@ -81,7 +79,7 @@ def buscar_online():
                     time.sleep(2)
                     return
 
-                # Salvar arquivo
+                # salvar arquivo
                 nome_musica = selecionada.get("trackName")
                 nome_sanitizado = re.sub(r'[\\/*?:"<>|]', "", nome_musica)
                 caminho_arquivo = os.path.join(
@@ -109,7 +107,7 @@ def listar_locais():
     limpar_tela()
     print(f"{CYAN}--- MÚSICAS EM ./{PASTA_LYRICS} ---{R}\n")
 
-    # Lista apenas arquivos dentro da pasta lyrics
+    # lista apenas arquivos dentro da pasta lyrics
     arquivos = [f for f in os.listdir(PASTA_LYRICS) if f.endswith('.lrc')]
 
     if not arquivos:
