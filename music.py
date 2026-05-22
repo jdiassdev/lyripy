@@ -1,49 +1,123 @@
 import os
 import re
+import glob
 import time
 import msvcrt
-import ctypes
+import subprocess
+import tempfile
 import requests
+from urllib.parse import quote
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.live import Live
-from rich.prompt import Prompt
+from rich.prompt import Prompt, Confirm
+
+try:
+    import yt_dlp
+    HAS_YT_DLP = True
+except ImportError:
+    HAS_YT_DLP = False
 
 console = Console()
 PASTA_LYRICS = "lyrics"
+PASTA_AUDIO  = "audio"
 
-if not os.path.exists(PASTA_LYRICS):
-    os.makedirs(PASTA_LYRICS)
-
-
-# ── Audio (Windows MCI via ctypes — sem dependências extras) ──────────────────
-
-_winmm = ctypes.windll.winmm
-_MCI_ALIAS = "lyripy"
+for pasta in (PASTA_LYRICS, PASTA_AUDIO):
+    if not os.path.exists(pasta):
+        os.makedirs(pasta)
 
 
-def _mci(cmd: str) -> str:
-    buf = ctypes.create_unicode_buffer(512)
-    _winmm.mciSendStringW(cmd, buf, 512, 0)
-    return buf.value
+# ── Audio (PowerShell + Windows Media Foundation) ─────────────────────────────
+# Funciona com qualquer formato que o Windows reconheça (m4a, mp3, wav, etc.)
+# Sem dependências extras — PowerShell está em todo Windows 10/11.
+
+def _ps_script_para(abs_path: str) -> str:
+    uri = "file:///" + quote(abs_path.replace("\\", "/"), safe="/:@")
+    return f"""
+Add-Type -AssemblyName PresentationCore
+$mp = New-Object System.Windows.Media.MediaPlayer
+$mp.Open([System.Uri]::new("{uri}"))
+Start-Sleep -Milliseconds 1200
+while ($true) {{
+    $cmd = [Console]::In.ReadLine()
+    if     ($cmd -eq 'play') {{ $mp.Play() }}
+    elseif ($cmd -eq 'pos')  {{ [Console]::WriteLine($mp.Position.TotalSeconds); [Console]::Out.Flush() }}
+    elseif ($cmd -eq 'p')    {{ $mp.Pause() }}
+    elseif ($cmd -eq 'r')    {{ $mp.Play()  }}
+    elseif ($cmd -eq 'q')    {{ $mp.Close(); break }}
+}}
+"""
 
 
 class AudioPlayer:
     def __init__(self, path: str):
-        _mci(f'open "{path}" alias {_MCI_ALIAS}')
-        _mci(f'set {_MCI_ALIAS} time format milliseconds')
+        script = _ps_script_para(os.path.abspath(path))
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".ps1", delete=False, encoding="utf-8"
+        )
+        self._tmp.write(script)
+        self._tmp.close()
+
+        self._proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive",
+             "-ExecutionPolicy", "Bypass", "-File", self._tmp.name],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+        )
+        time.sleep(1.8)  # aguarda o arquivo carregar (sem tocar ainda)
+
+    def _send(self, cmd: str):
+        try:
+            self._proc.stdin.write(cmd + "\n")
+            self._proc.stdin.flush()
+        except OSError:
+            pass
 
     @property
     def pos(self) -> float:
-        result = _mci(f'status {_MCI_ALIAS} position')
-        return int(result) / 1000.0 if result.strip() else 0.0
+        self._send("pos")
+        try:
+            return float(self._proc.stdout.readline().strip().replace(",", "."))
+        except (ValueError, OSError):
+            return 0.0
 
-    def play(self):   _mci(f'play {_MCI_ALIAS}')
-    def pause(self):  _mci(f'pause {_MCI_ALIAS}')
-    def resume(self): _mci(f'resume {_MCI_ALIAS}')
-    def close(self):  _mci(f'close {_MCI_ALIAS}')
+    def play(self):   self._send("play")
+    def pause(self):  self._send("p")
+    def resume(self): self._send("r")
+
+    def close(self):
+        self._send("q")
+        self._proc.wait(timeout=3)
+        os.unlink(self._tmp.name)
+
+
+# ── YouTube download ───────────────────────────────────────────────────────────
+
+def baixar_audio(query: str, nome_sanitizado: str) -> str | None:
+    base = os.path.join(PASTA_AUDIO, nome_sanitizado)
+    ydl_opts = {
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio",
+        "outtmpl": base + ".%(ext)s",
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"ytsearch1:{query}"])
+        arquivos = glob.glob(base + ".*")
+        return arquivos[0] if arquivos else None
+    except Exception:
+        return None
+
+
+def _buscar_audio_local(nome_sanitizado: str) -> str | None:
+    for ext in (".mp3", ".m4a", ".wav", ".wma", ".ogg"):
+        path = os.path.join(PASTA_AUDIO, nome_sanitizado + ext)
+        if os.path.isfile(path):
+            return path
+    return None
 
 
 # ── Teclado não-bloqueante ─────────────────────────────────────────────────────
@@ -51,7 +125,7 @@ class AudioPlayer:
 def _tecla():
     if msvcrt.kbhit():
         ch = msvcrt.getch()
-        if ch == b'\xe0':   # tecla especial (seta, F-key) — descarta
+        if ch == b'\xe0':
             msvcrt.getch()
             return None
         return ch
@@ -119,16 +193,31 @@ def buscar_online():
             time.sleep(2)
             return
 
-        nome = selecionada.get("trackName", "musica")
-        nome_sanitizado = re.sub(r'[\\/*?:"<>|]', "", nome)
-        caminho = os.path.join(PASTA_LYRICS, f"{nome_sanitizado}.lrc")
+        nome       = selecionada.get("trackName", "musica")
+        artista    = selecionada.get("artistName", "")
+        nome_san   = re.sub(r'[\\/*?:"<>|]', "", nome)
 
-        with open(caminho, "w", encoding="utf-8") as f:
+        with open(os.path.join(PASTA_LYRICS, f"{nome_san}.lrc"), "w", encoding="utf-8") as f:
             f.write(lrc)
 
-        console.print(f"\n[green]Salvo:[/] {caminho}")
-        time.sleep(1)
-        iniciar_karaoke(lrc, nome)
+        console.print(f"\n[green]Letra salva.[/]")
+
+        # ── oferecer download de áudio ────────────────────────────────────────
+        audio_path = None
+        if HAS_YT_DLP:
+            if Confirm.ask("\nBaixar áudio do YouTube?", default=True):
+                query = f"{artista} {nome}".strip()
+                with console.status(f"[cyan]Baixando '{nome}'...[/]"):
+                    audio_path = baixar_audio(query, nome_san)
+
+                if audio_path:
+                    console.print(f"[green]Áudio salvo:[/] {audio_path}")
+                    time.sleep(1)
+                else:
+                    console.print("[red]Falha no download. Continuando sem áudio.[/]")
+                    time.sleep(2)
+
+        iniciar_karaoke(lrc, nome, audio_path=audio_path)
 
     except Exception as e:
         console.print(f"[red]Erro ao conectar: {e}[/]")
@@ -150,9 +239,12 @@ def listar_locais():
     table = Table(border_style="dim", header_style="bold cyan", show_lines=False)
     table.add_column("#", style="magenta bold", width=3, justify="right")
     table.add_column("Arquivo", style="bold white")
+    table.add_column("Audio", width=6, justify="center")
 
     for i, arq in enumerate(arquivos, 1):
-        table.add_row(str(i), arq)
+        nome_san = os.path.splitext(arq)[0]
+        tem_audio = "[green]sim[/]" if _buscar_audio_local(nome_san) else "[dim]nao[/]"
+        table.add_row(str(i), arq, tem_audio)
 
     console.print(Panel(table, title="[bold cyan]MÚSICAS SALVAS[/]", border_style="cyan"))
     console.print("[dim]0 — Voltar[/]")
@@ -161,9 +253,11 @@ def listar_locais():
         escolha = int(Prompt.ask("\nNúmero"))
         if escolha == 0:
             return
-        arquivo = arquivos[escolha - 1]
+        arquivo  = arquivos[escolha - 1]
+        nome_san = os.path.splitext(arquivo)[0]
+        audio_path = _buscar_audio_local(nome_san)
         with open(os.path.join(PASTA_LYRICS, arquivo), "r", encoding="utf-8") as f:
-            iniciar_karaoke(f.read(), arquivo)
+            iniciar_karaoke(f.read(), arquivo, audio_path=audio_path)
     except (ValueError, IndexError):
         console.print("[red]Opção inválida.[/]")
         time.sleep(1.5)
@@ -210,9 +304,14 @@ def build_view(linhas, i, titulo, pausado=False, offset=0.0):
     )
 
 
-def iniciar_karaoke(conteudo_lrc, titulo):
+def iniciar_karaoke(conteudo_lrc, titulo, audio_path=None):
     linhas = parsear(conteudo_lrc)
 
+    if audio_path and os.path.isfile(audio_path):
+        _karaoke_com_audio(linhas, titulo, audio_path)
+        return
+
+    # sem áudio pré-definido: perguntar
     console.clear()
     console.print(Panel(
         f"[bold]{titulo}[/]\n\n"
@@ -220,10 +319,10 @@ def iniciar_karaoke(conteudo_lrc, titulo):
         "[dim]Suporta MP3, WAV, WMA  —  Enter para pular[/]",
         border_style="cyan", padding=(1, 4)
     ))
-    audio_path = Prompt.ask("  Caminho", default="").strip().strip('"')
+    caminho = Prompt.ask("  Caminho", default="").strip().strip('"')
 
-    if audio_path and os.path.isfile(audio_path):
-        _karaoke_com_audio(linhas, titulo, audio_path)
+    if caminho and os.path.isfile(caminho):
+        _karaoke_com_audio(linhas, titulo, caminho)
     else:
         _karaoke_manual(linhas, titulo)
 
@@ -232,7 +331,7 @@ def _karaoke_com_audio(linhas, titulo, audio_path):
     try:
         player = AudioPlayer(audio_path)
     except Exception as e:
-        console.print(f"[red]Erro ao carregar áudio: {e}[/]")
+        console.print(f"[red]Erro ao iniciar áudio: {e}[/]")
         time.sleep(2)
         _karaoke_manual(linhas, titulo)
         return
@@ -243,8 +342,8 @@ def _karaoke_com_audio(linhas, titulo, audio_path):
         border_style="cyan", padding=(1, 4)
     ))
     input("\n  >>> Pressione ENTER para iniciar <<<  \n")
+    player.play()  # áudio e loop partem juntos
 
-    player.play()
     offset = 0.0
     pausado = False
     current = -1
@@ -279,10 +378,10 @@ def _karaoke_com_audio(linhas, titulo, audio_path):
     time.sleep(2)
 
 
-def _karaoke_manual(linhas, titulo):
+def _karaoke_manual(linhas, titulo, aviso: str = "Dê o play no seu player externo..."):
     console.clear()
     console.print(Panel(
-        f"[bold]{titulo}[/]\n\n[dim]Dê o play no seu player externo...[/]\n"
+        f"[bold]{titulo}[/]\n\n[dim]{aviso}[/]\n"
         "[dim]Space: pausar  |  + / -: ajustar sincronia[/]",
         border_style="cyan", padding=(1, 4)
     ))
