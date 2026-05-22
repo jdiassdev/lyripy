@@ -1,39 +1,64 @@
 # LyriPy
 
-Player de letras sincronizadas `.lrc` direto no terminal. Busque músicas online, baixe o áudio do YouTube automaticamente e cante acompanhando as letras em tempo real.
+Player de karaokê no terminal com interface gráfica. Busque músicas online, baixe o áudio do YouTube automaticamente e acompanhe as letras sincronizadas em tempo real.
 
 ## Funcionalidades
 
-- **Busca online** — integração com [lrclib.net](https://lrclib.net), 20 resultados com indicador de LRC disponível
-- **Download de áudio** — baixa o áudio do YouTube via `yt-dlp` logo após encontrar a letra
-- **Biblioteca local** — letras em `lyrics/` e áudios em `audio/`, com detecção automática
-- **Janela de letras** — histórico + linha atual destacada + próximas linhas visíveis
-- **Controles em tempo real** — pausa e ajuste de sincronia enquanto a música toca
+- Busca integrada com [lrclib.net](https://lrclib.net) — letras sincronizadas `.lrc`
+- Download de áudio direto do YouTube via `yt-dlp`
+- Biblioteca local com detecção automática de áudio salvo
+- Janela de letras com linha atual em destaque + contexto anterior e próximo
+- Pausa e ajuste de sincronia em tempo real
+- Sincronização manual para quem não tiver arquivo de áudio
+- Executável standalone para Windows (sem precisar instalar Python)
 
-## Controles durante o karaokê
+## Como usar
 
-| Tecla | Ação |
-|-------|------|
-| `Space` | Pausar / retomar |
-| `+` | Adiantar sincronia em 0.5s |
-| `-` | Atrasar sincronia em 0.5s |
-| `Ctrl+C` | Sair da música |
+### Opção 1 — executável
 
-## Instalação
+Baixe o `LyriPy.exe` da pasta `dist/`, coloque em qualquer pasta e execute.  
+As pastas `lyrics/` e `audio/` são criadas automaticamente ao lado do `.exe`.
+
+### Opção 2 — rodar com Python
 
 ```bash
 pip install -r requirements.txt
-python music.py
+python app.py
 ```
 
-> Requer Python 3.10+ e Windows (usa `msvcrt` e Windows MCI para áudio).
+> Requer Python 3.10+ e Windows (usa PowerShell para reprodução de áudio).
+
+## Controles
+
+| Botão | Ação |
+|-------|------|
+| `▶ / ⏸` | Pausar / retomar (ou iniciar sync manual) |
+| `◀ 0.5s` | Atrasar a letra em 0.5s |
+| `0.5s ▶` | Adiantar a letra em 0.5s |
 
 ## Estrutura
 
 ```
 lyripy/
-├── music.py
+├── app.py            # aplicação principal
+├── music.py          # versão terminal (legado)
 ├── requirements.txt
-├── lyrics/     # letras .lrc
-└── audio/      # áudios baixados
+├── lyrics/           # letras .lrc salvas (ignorado pelo git)
+└── audio/            # áudios baixados  (ignorado pelo git)
+```
+
+## Dependências
+
+```
+requests
+rich
+yt-dlp
+customtkinter
+pyinstaller
+```
+
+## Build
+
+```bash
+python -m PyInstaller --onefile --windowed --name LyriPy app.py
 ```
