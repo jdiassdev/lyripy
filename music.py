@@ -2,136 +2,126 @@ import os
 import re
 import time
 import requests
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.live import Live
+from rich.prompt import Prompt
 
-# configuraçoes de cores
-Y = "\033[93m"
-P = "\033[95m"      # linha atual / opçoes (roxo)
-D = "\033[37;2m"    # texto antigo / escuro
-G = "\033[92m"      # verde / sucesso
-CYAN = "\033[96m"   # menu / info
-RED = "\033[91m"    # erro
-BOLD = "\033[1m"
-R = "\033[0m"       # reset
+console = Console()
 
-# --- CONFIGURAÇÃO DE PASTA ---
 PASTA_LYRICS = "lyrics"
 
 if not os.path.exists(PASTA_LYRICS):
     os.makedirs(PASTA_LYRICS)
 
 
-def limpar_tela():
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-
 def buscar_online():
-    limpar_tela()
-    print(f"{CYAN}--- BUSCAR MÚSICAS ---{R}\n")
-    termo_busca = input("Digite o Artista ou Música: ").strip()
+    console.clear()
+    console.print(Panel("[bold cyan]BUSCAR MÚSICAS[/]", border_style="cyan"))
 
-    if not termo_busca:
-        print(f"{RED}Por favor, digite algo para buscar.{R}")
+    termo = Prompt.ask("\nArtista ou música").strip()
+    if not termo:
+        console.print("[red]Digite algo para buscar.[/]")
         time.sleep(2)
         return
 
-    print(f"\n{CYAN}Procurando no servidor...{R}")
     try:
-        # 'q' que é uma busca geral
-        r = requests.get("https://lrclib.net/api/search",
-                         params={"q": termo_busca}, timeout=10)
+        with console.status("[cyan]Procurando no servidor...[/]"):
+            r = requests.get("https://lrclib.net/api/search",
+                             params={"q": termo}, timeout=10)
 
-        if r.status_code == 200:
-            resultados = r.json()
-
-            # pega os primeiros 20 resultados
-            opcoes = resultados[:20]
-
-            if not opcoes:
-                print(f"{RED}Nenhum resultado encontrado para '{termo_busca}'.{R}")
-                time.sleep(2)
-                return
-
-            limpar_tela()
-            print(f"{CYAN}--- SELECIONE A MÚSICA ---{R}\n")
-            for i, res in enumerate(opcoes, 1):
-                artista = res.get("artistName", "Desconhecido")
-                track = res.get("trackName", "Sem título")
-                # verifica se tem a letra sincronizada
-                status = f"{G}[LRC]{R}" if res.get(
-                    "syncedLyrics") else f"{RED}[Sem Sincronia]{R}"
-
-                print(f"{P}{i}{R} - {BOLD}{track}{R} | {artista} {status}")
-
-            print(f"\n{P}0{R} - Voltar")
-
-            escolha = input(f"\n{BOLD}Escolha o número: {R}")
-            if escolha == '0' or not escolha.isdigit():
-                return
-
-            idx = int(escolha) - 1
-            if 0 <= idx < len(opcoes):
-                selecionada = opcoes[idx]
-                lrc = selecionada.get("syncedLyrics")
-
-                if not lrc:
-                    print(
-                        f"\n{RED}Aviso: Esta música não possui letra sincronizada para o Karaokê.{R}")
-                    time.sleep(2)
-                    return
-
-                # salvar arquivo
-                nome_musica = selecionada.get("trackName")
-                nome_sanitizado = re.sub(r'[\\/*?:"<>|]', "", nome_musica)
-                caminho_arquivo = os.path.join(
-                    PASTA_LYRICS, f"{nome_sanitizado}.lrc")
-
-                with open(caminho_arquivo, "w", encoding="utf-8") as f:
-                    f.write(lrc)
-
-                print(f"{G}Sucesso! Letra sincronizada salva.{R}")
-                time.sleep(1)
-                iniciar_karaoke(lrc, nome_musica)
-            else:
-                print(f"{RED}Opção fora da lista.{R}")
-                time.sleep(1.5)
-        else:
-            print(f"{RED}Erro na API: {r.status_code}{R}")
+        if r.status_code != 200:
+            console.print(f"[red]Erro na API: {r.status_code}[/]")
             time.sleep(2)
+            return
+
+        resultados = r.json()[:20]
+        if not resultados:
+            console.print(f"[red]Nenhum resultado para '{termo}'.[/]")
+            time.sleep(2)
+            return
+
+        console.clear()
+
+        table = Table(border_style="dim", header_style="bold cyan", show_lines=False)
+        table.add_column("#", style="magenta bold", width=3, justify="right")
+        table.add_column("Música", style="bold white")
+        table.add_column("Artista", style="dim white")
+        table.add_column("LRC", width=5, justify="center")
+
+        for i, res in enumerate(resultados, 1):
+            lrc_badge = "[green]✓[/]" if res.get("syncedLyrics") else "[red]✗[/]"
+            table.add_row(str(i), res.get("trackName", "?"),
+                          res.get("artistName", "?"), lrc_badge)
+
+        console.print(Panel(table, title="[bold cyan]SELECIONE A MÚSICA[/]",
+                            border_style="cyan"))
+        console.print("[dim]0 — Voltar[/]")
+
+        escolha = Prompt.ask("\nNúmero")
+        if not escolha.isdigit() or escolha == "0":
+            return
+
+        idx = int(escolha) - 1
+        if not (0 <= idx < len(resultados)):
+            console.print("[red]Opção fora da lista.[/]")
+            time.sleep(1.5)
+            return
+
+        selecionada = resultados[idx]
+        lrc = selecionada.get("syncedLyrics")
+        if not lrc:
+            console.print("\n[red]Esta música não tem letra sincronizada.[/]")
+            time.sleep(2)
+            return
+
+        nome = selecionada.get("trackName", "musica")
+        nome_sanitizado = re.sub(r'[\\/*?:"<>|]', "", nome)
+        caminho = os.path.join(PASTA_LYRICS, f"{nome_sanitizado}.lrc")
+
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(lrc)
+
+        console.print(f"\n[green]✓ Salvo:[/] {caminho}")
+        time.sleep(1)
+        iniciar_karaoke(lrc, nome)
 
     except Exception as e:
-        print(f"{RED}Erro ao conectar: {e}{R}")
+        console.print(f"[red]Erro ao conectar: {e}[/]")
         time.sleep(2)
 
 
 def listar_locais():
-    limpar_tela()
-    print(f"{CYAN}--- MÚSICAS EM ./{PASTA_LYRICS} ---{R}\n")
-
-    # lista apenas arquivos dentro da pasta lyrics
-    arquivos = [f for f in os.listdir(PASTA_LYRICS) if f.endswith('.lrc')]
+    console.clear()
+    arquivos = [f for f in os.listdir(PASTA_LYRICS) if f.endswith(".lrc")]
 
     if not arquivos:
-        print(f"{RED}A pasta '{PASTA_LYRICS}' está vazia.{R}")
+        console.print(Panel(f"[red]A pasta '{PASTA_LYRICS}' está vazia.[/]",
+                            border_style="red"))
         time.sleep(2)
         return
 
-    for i, arq in enumerate(arquivos, 1):
-        print(f"{P}{i}{R} - {arq}")
+    table = Table(border_style="dim", header_style="bold cyan", show_lines=False)
+    table.add_column("#", style="magenta bold", width=3, justify="right")
+    table.add_column("Arquivo", style="bold white")
 
-    print(f"\n{P}0{R} - Voltar")
+    for i, arq in enumerate(arquivos, 1):
+        table.add_row(str(i), arq)
+
+    console.print(Panel(table, title="[bold cyan]MÚSICAS SALVAS[/]", border_style="cyan"))
+    console.print("[dim]0 — Voltar[/]")
 
     try:
-        escolha = int(input(f"\n{BOLD}Escolha o número: {R}"))
+        escolha = int(Prompt.ask("\nNúmero"))
         if escolha == 0:
             return
-
-        arquivo_escolhido = arquivos[escolha - 1]
-        caminho_completo = os.path.join(PASTA_LYRICS, arquivo_escolhido)
-
-        with open(caminho_completo, "r", encoding="utf-8") as f:
-            iniciar_karaoke(f.read(), arquivo_escolhido)
+        arquivo = arquivos[escolha - 1]
+        with open(os.path.join(PASTA_LYRICS, arquivo), "r", encoding="utf-8") as f:
+            iniciar_karaoke(f.read(), arquivo)
     except (ValueError, IndexError):
-        print(f"{RED}Opção inválida.{R}")
+        console.print("[red]Opção inválida.[/]")
         time.sleep(1.5)
 
 
@@ -139,65 +129,72 @@ def parsear(texto):
     pat = re.compile(r"\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)")
     linhas = []
     for m in pat.finditer(texto):
-        seg = int(m[1])*60 + int(m[2]) + int(m[3])/100
+        seg = int(m[1]) * 60 + int(m[2]) + int(m[3]) / 100
         linhas.append((seg, m[4].strip()))
     return sorted(linhas)
 
 
+def build_view(linhas, i, titulo):
+    text = Text(justify="left")
+
+    # Histórico: 4 linhas anteriores
+    for idx in range(max(0, i - 4), i):
+        linha = linhas[idx][1]
+        text.append(f"    {linha}\n" if linha else "\n", style="dim")
+
+    # Linha atual
+    atual = linhas[i][1]
+    text.append(f"  ► {atual}\n" if atual else "\n", style="bold magenta")
+
+    # Próximas: 3 linhas à frente
+    for idx in range(i + 1, min(i + 4, len(linhas))):
+        proxima = linhas[idx][1]
+        text.append(f"    {proxima}\n" if proxima else "\n", style="bright_black")
+
+    return Panel(text, title=f"[cyan]{titulo}[/]",
+                 border_style="magenta", padding=(1, 4))
+
+
 def iniciar_karaoke(conteudo_lrc, titulo):
     linhas = parsear(conteudo_lrc)
-    limpar_tela()
-    print(f"{CYAN}Preparado: {BOLD}{titulo}{R}")
-    print(f"Dê o play na música no seu player externo...")
-    input(f"\n{P}>>> Pressione ENTER para sincronizar <<< {R}")
+    console.clear()
+    console.print(Panel(
+        f"[bold]{titulo}[/]\n\n[dim]Dê o play no seu player externo...[/]",
+        border_style="cyan", padding=(1, 4)
+    ))
+    input("\n  >>> Pressione ENTER para sincronizar <<<  \n")
 
     inicio = time.time()
-
     try:
-        for i, (ts, texto) in enumerate(linhas):
-            while (time.time() - inicio) < ts:
-                time.sleep(0.01)
+        with Live(console=console, refresh_per_second=30, screen=True) as live:
+            for i, (ts, _) in enumerate(linhas):
+                while (time.time() - inicio) < ts:
+                    time.sleep(0.01)
+                live.update(build_view(linhas, i, titulo))
 
-            limpar_tela()
-            print(f"{G}Tocando: {titulo}{R}\n")
-
-            inicio_view = max(0, i - 6)
-            for idx in range(inicio_view, i + 1):
-                t_hist, txt_hist = linhas[idx]
-                if idx == i:
-                    print(f"{BOLD}{P}>>> {txt_hist}{R}")
-                else:
-                    print(f"{D}    {txt_hist}{R}")
-
-        print(f"\n{G}Fim da música!{R}")
+        console.print("\n[green]Fim da música![/]")
         time.sleep(2)
     except KeyboardInterrupt:
-        print(f"\n{RED}Interrompido.{R}")
+        console.print("\n[red]Interrompido.[/]")
         time.sleep(1)
 
 
-# Loop principal
+MENU = Panel("""
+  [magenta bold]1.[/]  Buscar nova música  [dim](Online)[/]
+  [yellow bold]2.[/]  Músicas salvas       [dim](Local)[/]
+  [dim]3.[/]  Sair
+""", title="[bold cyan]TERMINAL KARAOKE[/]", border_style="cyan", padding=(0, 4))
+
 while True:
-    limpar_tela()
-    print(f"""{BOLD}{CYAN}
-    ╔══════════════════════════════╗
-    ║      TERMINAL KARAOKÊ        ║
-    ╚══════════════════════════════╝{R}
-    
-    {P}1.{R} Buscar nova música (Online)
-    {Y}2.{R} Listar músicas salvas (Pasta {PASTA_LYRICS})
-    {P}3.{R} Fechar
-    """)
+    console.clear()
+    console.print(MENU)
 
-    opc = input(f"{BOLD}Escolha uma opção: {R}")
+    opc = Prompt.ask("[bold]Opção[/]", choices=["1", "2", "3"], show_choices=False)
 
-    if opc == '1':
+    if opc == "1":
         buscar_online()
-    elif opc == '2':
+    elif opc == "2":
         listar_locais()
-    elif opc == '3':
-        print(f"\n{CYAN}Até a próxima!{R}")
+    elif opc == "3":
+        console.print("\n[cyan]Até a próxima![/]")
         break
-    else:
-        print(f"{RED}Opção inválida!{R}")
-        time.sleep(1)
