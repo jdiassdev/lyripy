@@ -1,17 +1,29 @@
 # LyriPy
 
-## Um player de letras sincronizadas (.lrc) direto no seu terminal. Busque músicas online, salve localmente e cante acompanhando o realce das linhas em tempo real.
+Player de letras sincronizadas `.lrc` direto no terminal. Busque músicas online, toque o áudio junto ou sincronize manualmente com seu player externo.
 
-✨ Funcionalidades
+## Funcionalidades
 
-    Busca Online: Integração com API para baixar letras sincronizadas automaticamente.
+- **Busca online** — integração com [lrclib.net](https://lrclib.net), 20 resultados com indicador de LRC disponível
+- **Biblioteca local** — letras salvas automaticamente em `lyrics/`
+- **Áudio integrado** — abre MP3, WAV ou WMA junto com a letra (sem dependências extras)
+- **Janela de letras** — histórico + linha atual destacada + próximas linhas visíveis
+- **Controles em tempo real** — pausa e ajuste de sincronia enquanto a música toca
 
-    Biblioteca Local: Organização automática de arquivos na pasta /lyrics.
+## Controles durante o karaokê
 
-    Visual Neon: Interface colorida com realce na linha atual da música.
+| Tecla | Ação |
+|-------|------|
+| `Space` | Pausar / retomar |
+| `+` | Adiantar sincronia em 0.5s |
+| `-` | Atrasar sincronia em 0.5s |
+| `Ctrl+C` | Sair da música |
 
-## Roadmap (Próximos Passos)
+## Instalação
 
-- [ ] Implementar sistema de Offset manual para correção de sincronia.
-- [ ] Adicionar barra de progresso no rodapé do terminal.
-- [ ] Suporte a múltiplos idiomas na interface.
+```bash
+pip install -r requirements.txt
+python music.py
+```
+
+> Requer Python 3.10+ e Windows (usa `msvcrt` e Windows MCI para áudio).
